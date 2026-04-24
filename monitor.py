@@ -181,7 +181,7 @@ def check_stock():
 
             # 策略1: 通过 Lite 文本定位，然后查找相邻的按钮
             try:
-                # 先找到包含 "Lite" 的元素
+                # 先找到包含 "Lite" 的元素（通常是标题）
                 lite_locator = page.locator('text=Lite').first
                 if lite_locator.count() > 0:
                     log("找到 Lite 套餐区域")
@@ -189,33 +189,41 @@ def check_stock():
                     # 等待一下确保按钮已渲染
                     page.wait_for_timeout(1000)
 
-                    # 在 Lite 区域内查找按钮 - 尝试多种选择器
-                    button_selectors = [
-                        'button',  # 普通按钮
-                        '[role="button"]',  # ARIA按钮
-                        'a[class*="btn"]',  # 链接按钮
-                        '.ant-btn',  # Ant Design按钮
-                        '[class*="button"]',  # 包含button类名
-                    ]
+                    # 获取 Lite 卡片的父容器（向上查找包含卡片的祖先元素）
+                    lite_card = lite_locator.locator('xpath=ancestor::div[contains(@class, "card") or contains(@class, "Card")]').first
+                    if lite_card.count() == 0:
+                        # 如果没找到特定class，向上查找3层
+                        lite_card = lite_locator.locator('xpath=..').locator('xpath=..').locator('xpath=..').locator('xpath=..')
+
+                    # 在 Lite 卡片内查找所有可能的按钮
+                    all_buttons = lite_card.locator('button, [role="button"], a[class*="btn"], .ant-btn, [class*="button"]').all()
 
                     button_text = None
-                    for selector in button_selectors:
-                        try:
-                            # 获取 Lite 卡片的父容器
-                            lite_card = lite_locator.locator('xpath=ancestor::div[contains(@class, "card") or contains(@class, "Card") or position()=1]').first
-                            if lite_card.count() == 0:
-                                lite_card = lite_locator.locator('xpath=..').locator('xpath=..').locator('xpath=..')
+                    valid_button_keywords = ['售罄', '购买', '订阅', '立即', '抢购', '补货']
 
-                            button = lite_card.locator(selector).first
-                            if button.count() > 0:
-                                # 等待按钮可见
-                                button.wait_for(state='visible', timeout=5000)
-                                button_text = button.text_content().strip()
-                                if button_text:  # 确保文本不为空
-                                    log(f"使用选择器 '{selector}' 找到按钮: {button_text}")
-                                    break
-                        except Exception as e:
+                    for btn in all_buttons:
+                        try:
+                            text = btn.text_content().strip()
+                            log(f"扫描到按钮文本: {text}")
+                            # 优先选择包含有效关键词的按钮（如"售罄"、"购买"等）
+                            if text and any(kw in text for kw in valid_button_keywords):
+                                button_text = text
+                                log(f"找到有效购买按钮: {button_text}")
+                                break
+                        except Exception:
                             continue
+
+                    # 如果没找到有效按钮，尝试第一个非空按钮作为后备
+                    if not button_text and len(all_buttons) > 0:
+                        for btn in all_buttons:
+                            try:
+                                text = btn.text_content().strip()
+                                if text and len(text) > 1:
+                                    button_text = text
+                                    log(f"使用后备按钮: {button_text}")
+                                    break
+                            except Exception:
+                                continue
 
                     if button_text:
                         result['button_text'] = button_text
