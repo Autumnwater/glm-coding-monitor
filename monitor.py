@@ -199,19 +199,61 @@ def check_stock():
                     all_buttons = lite_card.locator('button, [role="button"], a[class*="btn"], .ant-btn, [class*="button"]').all()
 
                     button_text = None
-                    valid_button_keywords = ['售罄', '购买', '订阅', '立即', '抢购', '补货']
+                    # 优先级1: 售罄状态关键词（最准确）
+                    sold_out_keywords = ['售罄', '售完', '缺货', '无货']
+                    # 优先级2: 补货信息
+                    restock_keywords = ['补货']
+                    # 优先级3: 可购买关键词（但要排除纯标签）
+                    purchase_keywords = ['立即购买', '立即订阅', '立即抢购']
+                    # 排除的标签（这些是折扣标签，不是按钮）
+                    exclude_labels = ['特惠订阅', '优惠', '折扣', '立减']
 
+                    # 第一遍：寻找售罄状态按钮（最高优先级）
                     for btn in all_buttons:
                         try:
                             text = btn.text_content().strip()
                             log(f"扫描到按钮文本: {text}")
-                            # 优先选择包含有效关键词的按钮（如"售罄"、"购买"等）
-                            if text and any(kw in text for kw in valid_button_keywords):
+                            # 排除折扣标签
+                            if text and any(exclude in text for exclude in exclude_labels):
+                                log(f"跳过折扣标签: {text}")
+                                continue
+                            # 优先匹配售罄关键词
+                            if text and any(kw in text for kw in sold_out_keywords):
                                 button_text = text
-                                log(f"找到有效购买按钮: {button_text}")
+                                log(f"找到售罄状态按钮: {button_text}")
                                 break
                         except Exception:
                             continue
+
+                    # 第二遍：寻找补货信息按钮
+                    if not button_text:
+                        for btn in all_buttons:
+                            try:
+                                text = btn.text_content().strip()
+                                # 排除折扣标签
+                                if text and any(exclude in text for exclude in exclude_labels):
+                                    continue
+                                if text and any(kw in text for kw in restock_keywords):
+                                    button_text = text
+                                    log(f"找到补货信息按钮: {button_text}")
+                                    break
+                            except Exception:
+                                continue
+
+                    # 第三遍：寻找可购买按钮
+                    if not button_text:
+                        for btn in all_buttons:
+                            try:
+                                text = btn.text_content().strip()
+                                # 排除折扣标签
+                                if text and any(exclude in text for exclude in exclude_labels):
+                                    continue
+                                if text and any(kw in text for kw in purchase_keywords):
+                                    button_text = text
+                                    log(f"找到可购买按钮: {button_text}")
+                                    break
+                            except Exception:
+                                continue
 
                     # 如果没找到有效按钮，尝试第一个非空按钮作为后备
                     if not button_text and len(all_buttons) > 0:
@@ -228,11 +270,20 @@ def check_stock():
                     if button_text:
                         result['button_text'] = button_text
 
-                        # 判断是否售罄 - 检查多种关键词
-                        sold_out_keywords = ['售罄', '暂时', '缺货', '售完', '无货', '补货']
-                        if any(keyword in button_text for keyword in sold_out_keywords):
+                        # 根据按钮识别的优先级判断状态
+                        # 优先级1: 售罄状态
+                        if any(kw in button_text for kw in sold_out_keywords):
                             result['is_available'] = False
                             result['status'] = f"暂时售罄 ({button_text})"
+                        # 优先级2: 补货信息也算售罄
+                        elif any(kw in button_text for kw in restock_keywords):
+                            result['is_available'] = False
+                            result['status'] = f"暂时售罄 ({button_text})"
+                        # 优先级3: 可购买状态
+                        elif any(kw in button_text for kw in purchase_keywords):
+                            result['is_available'] = True
+                            result['status'] = f"有货 ({button_text})"
+                        # 其他情况
                         else:
                             result['is_available'] = True
                             result['status'] = f"有货 ({button_text})"
