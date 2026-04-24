@@ -195,12 +195,44 @@ def check_stock():
                         # 如果没找到特定class，向上查找3层
                         lite_card = lite_locator.locator('xpath=..').locator('xpath=..').locator('xpath=..').locator('xpath=..')
 
-                    # 在 Lite 卡片内查找所有可能的按钮
+                    # 策略1a: 在 Lite 卡片内查找所有可能的按钮
                     all_buttons = lite_card.locator('button, [role="button"], a[class*="btn"], .ant-btn, [class*="button"]').all()
+                    log(f"策略1a - 在Lite卡片内找到 {len(all_buttons)} 个按钮")
+
+                    # 策略1b: 如果没找到足够按钮，扩大到Lite卡片附近区域（使用父级容器）
+                    if len(all_buttons) < 2:
+                        # 向上查找更多层级，获取更大的容器
+                        parent_container = lite_locator.locator('xpath=ancestor::div[contains(@class, "section") or contains(@class, "Section") or contains(@class, "pricing") or contains(@class, "plan")]').first
+                        if parent_container.count() == 0:
+                            parent_container = lite_locator.locator('xpath=..').locator('xpath=..').locator('xpath=..').locator('xpath=..').locator('xpath=..').locator('xpath=..')
+
+                        parent_buttons = parent_container.locator('button, [role="button"], a[class*="btn"], .ant-btn, [class*="button"], [class*="action"]').all()
+                        log(f"策略1b - 在父容器内找到 {len(parent_buttons)} 个按钮")
+
+                        # 合并按钮列表，去重
+                        all_buttons = all_buttons + parent_buttons
+
+                    # 策略1c: 如果还是没找到，搜索整个页面中与Lite相关的按钮
+                    if len(all_buttons) < 2:
+                        # 获取页面所有按钮
+                        page_buttons = page.locator('button, [role="button"], a[class*="btn"], .ant-btn, [class*="button"]').all()
+                        log(f"策略1c - 页面总共找到 {len(page_buttons)} 个按钮")
+
+                        # 过滤出文本包含特定关键词的按钮
+                        for btn in page_buttons:
+                            try:
+                                text = btn.text_content().strip()
+                                # 如果按钮文本包含库存相关关键词，加入列表
+                                if text and any(kw in text for kw in ['售罄', '售完', '缺货', '无货', '补货', '购买', '订阅', '抢购']):
+                                    if btn not in all_buttons:
+                                        all_buttons.append(btn)
+                                        log(f"策略1c - 添加相关按钮: {text}")
+                            except Exception:
+                                continue
 
                     button_text = None
                     # 优先级1: 售罄状态关键词（最准确）
-                    sold_out_keywords = ['售罄', '售完', '缺货', '无货']
+                    sold_out_keywords = ['售罄', '售完', '缺货', '无货', '暂时售罄']
                     # 优先级2: 补货信息
                     restock_keywords = ['补货']
                     # 优先级3: 可购买关键词（但要排除纯标签）
@@ -208,21 +240,31 @@ def check_stock():
                     # 排除的标签（这些是折扣标签，不是按钮）
                     exclude_labels = ['特惠订阅', '优惠', '折扣', '立减']
 
+                    # 去重：记录已处理的按钮文本
+                    processed_texts = set()
+
                     # 第一遍：寻找售罄状态按钮（最高优先级）
+                    log(f"开始扫描 {len(all_buttons)} 个按钮...")
                     for btn in all_buttons:
                         try:
                             text = btn.text_content().strip()
-                            log(f"扫描到按钮文本: {text}")
+                            # 跳过已处理的相同文本
+                            if text in processed_texts:
+                                continue
+                            processed_texts.add(text)
+
+                            log(f"扫描到按钮文本: '{text}'")
                             # 排除折扣标签
                             if text and any(exclude in text for exclude in exclude_labels):
-                                log(f"跳过折扣标签: {text}")
+                                log(f"  -> 跳过折扣标签")
                                 continue
                             # 优先匹配售罄关键词
                             if text and any(kw in text for kw in sold_out_keywords):
                                 button_text = text
-                                log(f"找到售罄状态按钮: {button_text}")
+                                log(f"  -> 找到售罄状态按钮: {button_text}")
                                 break
-                        except Exception:
+                        except Exception as e:
+                            log(f"扫描按钮时出错: {e}")
                             continue
 
                     # 第二遍：寻找补货信息按钮
@@ -230,12 +272,11 @@ def check_stock():
                         for btn in all_buttons:
                             try:
                                 text = btn.text_content().strip()
-                                # 排除折扣标签
-                                if text and any(exclude in text for exclude in exclude_labels):
+                                if text in processed_texts or (text and any(exclude in text for exclude in exclude_labels)):
                                     continue
                                 if text and any(kw in text for kw in restock_keywords):
                                     button_text = text
-                                    log(f"找到补货信息按钮: {button_text}")
+                                    log(f"  -> 找到补货信息按钮: {button_text}")
                                     break
                             except Exception:
                                 continue
@@ -245,24 +286,23 @@ def check_stock():
                         for btn in all_buttons:
                             try:
                                 text = btn.text_content().strip()
-                                # 排除折扣标签
-                                if text and any(exclude in text for exclude in exclude_labels):
+                                if text in processed_texts or (text and any(exclude in text for exclude in exclude_labels)):
                                     continue
                                 if text and any(kw in text for kw in purchase_keywords):
                                     button_text = text
-                                    log(f"找到可购买按钮: {button_text}")
+                                    log(f"  -> 找到可购买按钮: {button_text}")
                                     break
                             except Exception:
                                 continue
 
-                    # 如果没找到有效按钮，尝试第一个非空按钮作为后备
+                    # 如果没找到有效按钮，尝试第一个非空且非折扣标签的按钮作为后备
                     if not button_text and len(all_buttons) > 0:
                         for btn in all_buttons:
                             try:
                                 text = btn.text_content().strip()
-                                if text and len(text) > 1:
+                                if text and len(text) > 1 and not any(exclude in text for exclude in exclude_labels):
                                     button_text = text
-                                    log(f"使用后备按钮: {button_text}")
+                                    log(f"  -> 使用后备按钮: {button_text}")
                                     break
                             except Exception:
                                 continue
@@ -271,22 +311,26 @@ def check_stock():
                         result['button_text'] = button_text
 
                         # 根据按钮识别的优先级判断状态
-                        # 优先级1: 售罄状态
+                        # 优先级1: 售罄状态（包括"暂时售罄"）
                         if any(kw in button_text for kw in sold_out_keywords):
                             result['is_available'] = False
                             result['status'] = f"暂时售罄 ({button_text})"
+                            log(f"状态判断: 售罄 - 匹配关键词在 '{button_text}' 中")
                         # 优先级2: 补货信息也算售罄
                         elif any(kw in button_text for kw in restock_keywords):
                             result['is_available'] = False
                             result['status'] = f"暂时售罄 ({button_text})"
+                            log(f"状态判断: 售罄(补货中) - 匹配关键词在 '{button_text}' 中")
                         # 优先级3: 可购买状态
                         elif any(kw in button_text for kw in purchase_keywords):
                             result['is_available'] = True
                             result['status'] = f"有货 ({button_text})"
-                        # 其他情况
+                            log(f"状态判断: 有货 - 匹配关键词在 '{button_text}' 中")
+                        # 其他情况: 未知，保守判断为售罄
                         else:
-                            result['is_available'] = True
-                            result['status'] = f"有货 ({button_text})"
+                            result['is_available'] = False
+                            result['status'] = f"状态未知 ({button_text})"
+                            log(f"状态判断: 未知 - 文本 '{button_text}' 未匹配任何关键词，保守判断为售罄")
                     else:
                         log("未获取到按钮文本，尝试策略2")
                         raise Exception("按钮文本为空")
