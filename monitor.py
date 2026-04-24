@@ -236,7 +236,7 @@ def check_stock():
                     # 优先级2: 补货信息
                     restock_keywords = ['补货']
                     # 优先级3: 可购买关键词（但要排除纯标签）
-                    purchase_keywords = ['立即购买', '立即订阅', '立即抢购']
+                    purchase_keywords = ['立即购买', '立即订阅', '立即抢购', '即刻订阅']
                     # 排除的标签（这些是折扣标签，不是按钮）
                     exclude_labels = ['特惠订阅', '优惠', '折扣', '立减']
 
