@@ -340,21 +340,35 @@ def check_stock():
             except Exception as e:
                 log(f"策略1检测失败: {e}")
 
-                # 策略2: 通过页面文本全局搜索
-                try:
-                    page_content = page.content()
-                    if '暂时售罄' in page_content:
+            # 策略2: 通过页面文本全局搜索（验证或备用）
+            try:
+                page_content = page.content()
+                log("执行策略2: 全局页面内容检查...")
+
+                # 检查是否包含售罄关键词
+                if '暂时售罄' in page_content or '已售罄' in page_content:
+                    # 如果策略1判断为有货，但页面显示售罄，以页面为准
+                    if result.get('is_available') == True:
+                        log(f"策略2覆盖: 策略1判断为有货，但页面内容显示售罄，修正为售罄")
+                        result['is_available'] = False
+                        result['status'] = f"暂时售罄 (页面文本检测)"
+                    elif not result.get('button_text'):
+                        # 策略1失败时的备用判断
                         result['is_available'] = False
                         result['status'] = "暂时售罄"
                         log("通过页面内容检测到: 暂时售罄")
-                    elif '立即购买' in page_content or '立即订阅' in page_content:
+                elif not result.get('button_text'):
+                    # 策略1失败且页面没有售罄标记时
+                    if '立即购买' in page_content or '立即订阅' in page_content or '即刻订阅' in page_content:
                         result['is_available'] = True
                         result['status'] = "有货"
                         log("通过页面内容检测到: 有货")
                     else:
                         result['error'] = "无法确定库存状态"
-                except Exception as e2:
+            except Exception as e2:
+                if not result.get('button_text'):
                     result['error'] = f"策略2也失败: {e2}"
+                log(f"策略2执行出错: {e2}")
 
         except PlaywrightTimeout:
             result['error'] = "页面加载超时"
