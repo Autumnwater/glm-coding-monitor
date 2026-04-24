@@ -186,24 +186,51 @@ def check_stock():
                 if lite_locator.count() > 0:
                     log("找到 Lite 套餐区域")
 
-                    # 在 Lite 区域内查找按钮
-                    lite_section = lite_locator.locator('xpath=../../../../..')
-                    button = lite_section.locator('button').first
+                    # 等待一下确保按钮已渲染
+                    page.wait_for_timeout(1000)
 
-                    if button.count() > 0:
-                        button_text = button.text_content().strip()
+                    # 在 Lite 区域内查找按钮 - 尝试多种选择器
+                    button_selectors = [
+                        'button',  # 普通按钮
+                        '[role="button"]',  # ARIA按钮
+                        'a[class*="btn"]',  # 链接按钮
+                        '.ant-btn',  # Ant Design按钮
+                        '[class*="button"]',  # 包含button类名
+                    ]
+
+                    button_text = None
+                    for selector in button_selectors:
+                        try:
+                            # 获取 Lite 卡片的父容器
+                            lite_card = lite_locator.locator('xpath=ancestor::div[contains(@class, "card") or contains(@class, "Card") or position()=1]').first
+                            if lite_card.count() == 0:
+                                lite_card = lite_locator.locator('xpath=..').locator('xpath=..').locator('xpath=..')
+
+                            button = lite_card.locator(selector).first
+                            if button.count() > 0:
+                                # 等待按钮可见
+                                button.wait_for(state='visible', timeout=5000)
+                                button_text = button.text_content().strip()
+                                if button_text:  # 确保文本不为空
+                                    log(f"使用选择器 '{selector}' 找到按钮: {button_text}")
+                                    break
+                        except Exception as e:
+                            continue
+
+                    if button_text:
                         result['button_text'] = button_text
-                        log(f"检测到按钮文本: {button_text}")
 
-                        # 判断是否售罄
-                        if '售罄' in button_text or '暂时' in button_text:
+                        # 判断是否售罄 - 检查多种关键词
+                        sold_out_keywords = ['售罄', '暂时', '缺货', '售完', '无货', '补货']
+                        if any(keyword in button_text for keyword in sold_out_keywords):
                             result['is_available'] = False
                             result['status'] = f"暂时售罄 ({button_text})"
                         else:
                             result['is_available'] = True
                             result['status'] = f"有货 ({button_text})"
                     else:
-                        result['error'] = "未找到购买按钮"
+                        log("未获取到按钮文本，尝试策略2")
+                        raise Exception("按钮文本为空")
                 else:
                     result['error'] = "未找到 Lite 套餐区域"
 
