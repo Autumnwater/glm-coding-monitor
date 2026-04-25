@@ -179,29 +179,42 @@ def check_stock():
                 page.screenshot(path='screenshot.png', full_page=True)
                 log("已保存调试截图: screenshot.png")
 
-            # 策略0: 直接查找 Lite 区域的"暂时售罄"文本（最准确）
+            # 策略0: 直接查找 Lite 区域内的 disabled 按钮（最准确）
             try:
-                # 获取页面内容检查
-                page_text = page.locator('body').text_content()
+                # 找到 Lite 卡片区域
+                lite_card = page.locator('text=Lite').first.locator('xpath=ancestor::div[contains(@class, "package-card") or contains(@class, "card") or position()=4]').first
+                if lite_card.count() > 0:
+                    log("策略0 - 找到 Lite 卡片区域")
 
-                # 检查 Lite 区域附近是否有"暂时售罄"文本
-                # 通过查找包含"Lite"的元素，然后检查其父元素是否包含"暂时售罄"
-                lite_elements = page.locator('text=Lite').all()
-                for lite_elem in lite_elements:
-                    try:
-                        # 获取包含 Lite 的父容器（向上查找5层，通常包含整个卡片）
-                        parent = lite_elem.locator('xpath=ancestor::div[5]').first
-                        if parent.count() > 0:
-                            parent_text = parent.text_content()
-                            if '暂时售罄' in parent_text:
-                                log("策略0 - 在Lite区域直接检测到'暂时售罄'")
-                                result['is_available'] = False
-                                result['status'] = "暂时售罄 (Lite区域检测到)"
-                                result['button_text'] = "暂时售罄"
-                                browser.close()
-                                return result
-                    except Exception:
-                        continue
+                    # 在 Lite 卡片内查找 disabled 按钮（售罄状态）
+                    disabled_btn = lite_card.locator('button[disabled], button.is-disabled, [disabled].buy-btn').first
+                    if disabled_btn.count() > 0:
+                        # 获取按钮的 name 属性或文本内容
+                        btn_name = disabled_btn.get_attribute('name') or ''
+                        btn_text = disabled_btn.text_content().strip() or ''
+
+                        # 优先使用 name 属性，它包含完整状态
+                        status_text = btn_name if btn_name else btn_text
+                        log(f"策略0 - 找到 disabled 按钮: name='{btn_name}', text='{btn_text}'")
+
+                        if '售罄' in status_text or '补货' in status_text:
+                            result['is_available'] = False
+                            result['status'] = f"暂时售罄 ({status_text})"
+                            result['button_text'] = status_text
+                            log(f"策略0 - 检测到售罄状态: {status_text}")
+                            browser.close()
+                            return result
+
+                    # 如果没找到 disabled 按钮，查找可点击的购买按钮
+                    active_btn = lite_card.locator('button:not([disabled]), button.buy-btn:not(.is-disabled)').first
+                    if active_btn.count() > 0:
+                        btn_text = active_btn.text_content().strip()
+                        log(f"策略0 - 找到可购买按钮: '{btn_text}'")
+                        result['is_available'] = True
+                        result['status'] = f"有货 ({btn_text})"
+                        result['button_text'] = btn_text
+                        browser.close()
+                        return result
             except Exception as e:
                 log(f"策略0执行失败: {e}")
 
@@ -233,15 +246,20 @@ def check_stock():
                             all_buttons = lite_section.locator('button, [role="button"]').all()
                             log(f"策略1b - 在Lite区域找到 {len(all_buttons)} 个按钮")
 
-                    # 策略1c: 如果还是没找到，尝试通过文本内容查找 Lite 区域
+                    # 策略1c: 如果还是没找到，直接查找"暂时售罄"文本元素
                     if len(all_buttons) == 0:
-                        # 尝试找到包含"暂时售罄"且靠近"Lite"的元素
-                        sold_out_near_lite = page.locator('text=暂时售罄').filter(
-                            has=page.locator('text=Lite').first
-                        )
-                        if sold_out_near_lite.count() > 0:
-                            log("策略1c - 找到Lite区域的售罄标记")
-                            all_buttons = [sold_out_near_lite.first]
+                        try:
+                            sold_out_elem = page.locator('text=暂时售罄').first
+                            if sold_out_elem.count() > 0:
+                                log("策略1c - 直接找到'暂时售罄'元素")
+                                sold_out_text = sold_out_elem.text_content().strip()
+                                result['is_available'] = False
+                                result['status'] = f"暂时售罄 ({sold_out_text})"
+                                result['button_text'] = sold_out_text
+                                browser.close()
+                                return result
+                        except Exception as e:
+                            log(f"策略1c失败: {e}")
 
                     button_text = None
                     # 优先级1: 售罄状态关键词（最准确）
