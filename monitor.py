@@ -179,6 +179,32 @@ def check_stock():
                 page.screenshot(path='screenshot.png', full_page=True)
                 log("已保存调试截图: screenshot.png")
 
+            # 策略0: 直接查找 Lite 区域的"暂时售罄"文本（最准确）
+            try:
+                # 获取页面内容检查
+                page_text = page.locator('body').text_content()
+
+                # 检查 Lite 区域附近是否有"暂时售罄"文本
+                # 通过查找包含"Lite"的元素，然后检查其父元素是否包含"暂时售罄"
+                lite_elements = page.locator('text=Lite').all()
+                for lite_elem in lite_elements:
+                    try:
+                        # 获取包含 Lite 的父容器（向上查找5层，通常包含整个卡片）
+                        parent = lite_elem.locator('xpath=ancestor::div[5]').first
+                        if parent.count() > 0:
+                            parent_text = parent.text_content()
+                            if '暂时售罄' in parent_text:
+                                log("策略0 - 在Lite区域直接检测到'暂时售罄'")
+                                result['is_available'] = False
+                                result['status'] = "暂时售罄 (Lite区域检测到)"
+                                result['button_text'] = "暂时售罄"
+                                browser.close()
+                                return result
+                    except Exception:
+                        continue
+            except Exception as e:
+                log(f"策略0执行失败: {e}")
+
             # 策略1: 通过 Lite 文本定位，然后查找相邻的按钮
             try:
                 # 先找到包含 "Lite" 的元素（通常是标题）
@@ -195,40 +221,27 @@ def check_stock():
                         # 如果没找到特定class，向上查找3层
                         lite_card = lite_locator.locator('xpath=..').locator('xpath=..').locator('xpath=..').locator('xpath=..')
 
-                    # 策略1a: 在 Lite 卡片内查找所有可能的按钮
+                    # 策略1a: 在 Lite 卡片内查找所有可能的按钮（只在此范围内查找）
                     all_buttons = lite_card.locator('button, [role="button"], a[class*="btn"], .ant-btn, [class*="button"]').all()
-                    log(f"策略1a - 在Lite卡片内找到 {len(all_buttons)} 个按钮")
+                    log(f"策略1 - 在Lite卡片内找到 {len(all_buttons)} 个按钮")
 
-                    # 策略1b: 如果没找到足够按钮，扩大到Lite卡片附近区域（使用父级容器）
-                    if len(all_buttons) < 2:
-                        # 向上查找更多层级，获取更大的容器
-                        parent_container = lite_locator.locator('xpath=ancestor::div[contains(@class, "section") or contains(@class, "Section") or contains(@class, "pricing") or contains(@class, "plan")]').first
-                        if parent_container.count() == 0:
-                            parent_container = lite_locator.locator('xpath=..').locator('xpath=..').locator('xpath=..').locator('xpath=..').locator('xpath=..').locator('xpath=..')
+                    # 策略1b: 如果Lite卡片内没有按钮，尝试查找 Lite 标题下方的特定按钮
+                    if len(all_buttons) == 0:
+                        # 尝试直接查找 Lite 下方的按钮（基于DOM层级）
+                        lite_section = lite_locator.locator('xpath=ancestor::div[4]')  # 向上4层通常包含整个卡片
+                        if lite_section.count() > 0:
+                            all_buttons = lite_section.locator('button, [role="button"]').all()
+                            log(f"策略1b - 在Lite区域找到 {len(all_buttons)} 个按钮")
 
-                        parent_buttons = parent_container.locator('button, [role="button"], a[class*="btn"], .ant-btn, [class*="button"], [class*="action"]').all()
-                        log(f"策略1b - 在父容器内找到 {len(parent_buttons)} 个按钮")
-
-                        # 合并按钮列表，去重
-                        all_buttons = all_buttons + parent_buttons
-
-                    # 策略1c: 如果还是没找到，搜索整个页面中与Lite相关的按钮
-                    if len(all_buttons) < 2:
-                        # 获取页面所有按钮
-                        page_buttons = page.locator('button, [role="button"], a[class*="btn"], .ant-btn, [class*="button"]').all()
-                        log(f"策略1c - 页面总共找到 {len(page_buttons)} 个按钮")
-
-                        # 过滤出文本包含特定关键词的按钮
-                        for btn in page_buttons:
-                            try:
-                                text = btn.text_content().strip()
-                                # 如果按钮文本包含库存相关关键词，加入列表
-                                if text and any(kw in text for kw in ['售罄', '售完', '缺货', '无货', '补货', '购买', '订阅', '抢购']):
-                                    if btn not in all_buttons:
-                                        all_buttons.append(btn)
-                                        log(f"策略1c - 添加相关按钮: {text}")
-                            except Exception:
-                                continue
+                    # 策略1c: 如果还是没找到，尝试通过文本内容查找 Lite 区域
+                    if len(all_buttons) == 0:
+                        # 尝试找到包含"暂时售罄"且靠近"Lite"的元素
+                        sold_out_near_lite = page.locator('text=暂时售罄').filter(
+                            has=page.locator('text=Lite').first
+                        )
+                        if sold_out_near_lite.count() > 0:
+                            log("策略1c - 找到Lite区域的售罄标记")
+                            all_buttons = [sold_out_near_lite.first]
 
                     button_text = None
                     # 优先级1: 售罄状态关键词（最准确）
